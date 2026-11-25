@@ -12,15 +12,15 @@ def run(args):
     if r.returncode != 0:
         raise RuntimeError(r.stderr.decode()[-400:])
 
-def render_tgs(data, d):
+def render_tgs(data, d, size=512, maxfps=15):
     from rlottie_python import LottieAnimation
     p = os.path.join(d, "in.tgs"); open(p, "wb").write(data)
     anim = LottieAnimation.from_tgs(p)
     n = anim.lottie_animation_get_totalframe()
     fps = anim.lottie_animation_get_framerate() or 30
-    w, h = 512, 512
+    w, h = size, size
     step = 1
-    while fps / step > 30: step += 1
+    while fps / step > maxfps: step += 1
     os.makedirs(os.path.join(d, "f"), exist_ok=True)
     k = 0
     for i in range(0, n, step):
@@ -28,29 +28,29 @@ def render_tgs(data, d):
         im.save(os.path.join(d, "f", "%04d.png" % k)); k += 1
     return ["-framerate", str(fps / step), "-i", os.path.join(d, "f", "%04d.png")]
 
-def src_args(kind, data, d):
+def src_args(kind, data, d, size=512):
     if kind == "tgs":
-        return render_tgs(data, d)
+        return render_tgs(data, d, size)
     p = os.path.join(d, "in.webm"); open(p, "wb").write(data)
     return ["-c:v", "libvpx-vp9", "-i", p]
 
 def convert(kind, fmt, data):
     d = tempfile.mkdtemp()
     try:
-        src = src_args(kind, data, d)
+        src = src_args(kind, data, d, 384 if fmt in ("gif", "mp4") else (96 if fmt == "tray" else 512))
         out = os.path.join(d, "out")
         if fmt == "gif":
-            vf = "fps=20,scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,split[a][b];[a]palettegen=reserve_transparent=1[p];[b][p]paletteuse=alpha_threshold=128"
+            vf = "fps=15,scale=384:384:force_original_aspect_ratio=decrease:flags=lanczos,split[a][b];[a]palettegen=reserve_transparent=1[p];[b][p]paletteuse=alpha_threshold=128"
             run(FF + src + ["-vf", vf, "-loop", "0", out + ".gif"]); return open(out + ".gif", "rb").read(), "image/gif"
         if fmt == "mp4":
             vf = "fps=30,scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,pad=ceil(iw/2)*2:ceil(ih/2)*2,format=yuv420p"
             # flatten alpha on a white background
-            fc = "color=c=white:s=512x512:r=30[bg];[0:v]fps=30,scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2:shortest=1,format=yuv420p"
+            fc = "color=c=white:s=384x384:r=15[bg];[0:v]fps=15,scale=384:384:force_original_aspect_ratio=decrease:flags=lanczos[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2:shortest=1,format=yuv420p"
             run(FF + src + ["-filter_complex", fc, "-c:v", "libx264", "-movflags", "+faststart", "-an", out + ".mp4"]); return open(out + ".mp4", "rb").read(), "video/mp4"
         if fmt in ("awebp", "wa"):
             wa = fmt == "wa"
             best = None
-            for q, fps in ((75, 15), (55, 15), (40, 12), (28, 10), (18, 8), (10, 8)):
+            for q, fps in ((70, 15), (50, 12), (35, 10), (22, 8), (12, 8)):
                 vf = f"fps={fps},scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000,format=rgba" if wa else f"fps={fps},scale=512:512:force_original_aspect_ratio=decrease:flags=lanczos,format=rgba"
                 run(FF + src + ["-t", "9.5", "-vf", vf, "-c:v", "libwebp", "-lossless", "0", "-q:v", str(q), "-compression_level", "4", "-loop", "0", "-an", out + ".webp"])
                 best = open(out + ".webp", "rb").read()
