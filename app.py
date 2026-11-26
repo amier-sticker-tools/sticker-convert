@@ -82,4 +82,5 @@ class H(BaseHTTPRequestHandler):
         except Exception as e:
             self._send(500, str(e).encode()[:500])
 
-ThreadingHTTPServer(("0.0.0.0", 7860), H).serve_forever()
+if __name__ == "__main__":
+    ThreadingHTTPServer(("0.0.0.0", 7860), H).serve_forever()
