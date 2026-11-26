@@ -257,9 +257,9 @@ jobs:
             }
 
             static void prune(File filesDir, String keep) {
-              File[] ps = new File(filesDir, "packs").listFiles(); if (ps == null || ps.length <= 10) return;
+              File[] ps = new File(filesDir, "packs").listFiles(); if (ps == null || ps.length <= 40) return;
               Arrays.sort(ps, new Comparator<File>() { public int compare(File a, File b) { return Long.compare(a.lastModified(), b.lastModified()); } });
-              for (int i = 0; i < ps.length - 10; i++) if (!ps[i].getName().equals(keep)) {
+              for (int i = 0; i < ps.length - 40; i++) if (!ps[i].getName().equals(keep)) {
                 File[] in = ps[i].listFiles(); if (in != null) for (File f : in) f.delete(); ps[i].delete(); }
             }
           }
@@ -341,6 +341,7 @@ jobs:
                 case 1: return "vnd.android.cursor.dir/vnd." + AUTH + ".metadata";
                 case 2: return "vnd.android.cursor.item/vnd." + AUTH + ".metadata";
                 case 3: return "vnd.android.cursor.dir/vnd." + AUTH + ".stickers";
+                case 4: { String n = uri.getLastPathSegment(); return n != null && n.endsWith(".png") ? "image/png" : "image/webp"; }
               }
               return null;
             }
