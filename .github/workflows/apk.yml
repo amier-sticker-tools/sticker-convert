@@ -1,0 +1,336 @@
+name: apk
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+      - name: write sources
+        run: |
+          mkdir -p $(dirname android/settings.gradle)
+          cat > android/settings.gradle <<'SRC_EOF'
+          pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+          dependencyResolutionManagement { repositories { google(); mavenCentral() } }
+          rootProject.name = "StickerBridge"
+          include ':app'
+          SRC_EOF
+          mkdir -p $(dirname android/build.gradle)
+          cat > android/build.gradle <<'SRC_EOF'
+          plugins { id 'com.android.application' version '8.5.2' apply false }
+          SRC_EOF
+          mkdir -p $(dirname android/gradle.properties)
+          cat > android/gradle.properties <<'SRC_EOF'
+          org.gradle.jvmargs=-Xmx2g
+          android.useAndroidX=false
+          SRC_EOF
+          mkdir -p $(dirname android/app/build.gradle)
+          cat > android/app/build.gradle <<'SRC_EOF'
+          plugins { id 'com.android.application' }
+          android {
+            namespace 'com.t1uu1.stickerbridge'
+            compileSdk 34
+            defaultConfig { applicationId 'com.t1uu1.stickerbridge'; minSdk 21; targetSdk 33; versionCode 1; versionName '1.0' }
+            compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+          }
+          SRC_EOF
+          mkdir -p $(dirname android/app/src/main/AndroidManifest.xml)
+          cat > android/app/src/main/AndroidManifest.xml <<'SRC_EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <queries>
+              <intent><action android:name="com.whatsapp.intent.action.ENABLE_STICKER_PACK"/></intent>
+              <package android:name="com.whatsapp"/>
+              <package android:name="com.whatsapp.w4b"/>
+            </queries>
+            <application android:label="StickerBridge" android:allowBackup="false" android:theme="@android:style/Theme.Material.Light">
+              <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTask">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN"/>
+                  <category android:name="android.intent.category.LAUNCHER"/>
+                </intent-filter>
+                <intent-filter>
+                  <action android:name="android.intent.action.VIEW"/>
+                  <category android:name="android.intent.category.DEFAULT"/>
+                  <category android:name="android.intent.category.BROWSABLE"/>
+                  <data android:scheme="stickerbridge" android:host="p"/>
+                </intent-filter>
+              </activity>
+              <provider android:name=".StickerContentProvider" android:authorities="com.t1uu1.stickerbridge.stickercontentprovider"
+                android:enabled="true" android:exported="true" android:readPermission="com.whatsapp.sticker.READ"/>
+            </application>
+          </manifest>
+          SRC_EOF
+          mkdir -p $(dirname android/app/src/main/java/com/t1uu1/stickerbridge/MainActivity.java)
+          cat > android/app/src/main/java/com/t1uu1/stickerbridge/MainActivity.java <<'SRC_EOF'
+          package com.t1uu1.stickerbridge;
+
+          import android.app.Activity;
+          import android.content.ActivityNotFoundException;
+          import android.content.Intent;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.view.Gravity;
+          import android.text.InputType;
+          import android.view.View;
+          import android.widget.Button;
+          import android.widget.EditText;
+          import android.widget.LinearLayout;
+          import android.widget.TextView;
+          import java.io.File;
+          import java.io.FileOutputStream;
+          import java.io.InputStream;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.util.zip.ZipEntry;
+          import java.util.zip.ZipInputStream;
+
+          public class MainActivity extends Activity {
+            static final String AUTH = "com.t1uu1.stickerbridge.stickercontentprovider";
+            static final String BASE = "https://contact-bot.amier8627.workers.dev/z/";
+            TextView tv; EditText et;
+
+            @Override protected void onCreate(Bundle b) {
+              super.onCreate(b);
+              LinearLayout l = new LinearLayout(this);
+              l.setOrientation(LinearLayout.VERTICAL); l.setPadding(48, 96, 48, 48);
+              et = new EditText(this); et.setHint("الصق لينك الباك هنا"); et.setInputType(InputType.TYPE_TEXT_VARIATION_URI); et.setSingleLine(true);
+              Button bt = new Button(this); bt.setText("حوّل للواتساب");
+              tv = new TextView(this); tv.setTextSize(18); tv.setGravity(Gravity.CENTER); tv.setPadding(0, 48, 0, 0);
+              l.addView(et); l.addView(bt); l.addView(tv);
+              setContentView(l);
+              bt.setOnClickListener(new View.OnClickListener() { public void onClick(View v) {
+                startWith(et.getText().toString().trim()); } });
+              handle(getIntent());
+            }
+
+            @Override protected void onNewIntent(Intent i) { super.onNewIntent(i); setIntent(i); handle(i); }
+
+            void say(final String s) { runOnUiThread(new Runnable() { public void run() { tv.setText(s); } }); }
+
+            void handle(Intent i) {
+              Uri u = i == null ? null : i.getData();
+              if (u == null || u.getPathSegments().isEmpty()) { say("افتح لينك الباك اللي البوت بعتهولك."); return; }
+              startWith(u.toString());
+            }
+
+            void startWith(String link) {
+              String t = link.replaceAll("[/\\s]+$", "");
+              final String id = t.substring(t.lastIndexOf('/') + 1);
+              if (!id.matches("[a-z0-9]{6,40}")) { say("اللينك ده مش صح. انسخه من البوت تاني."); return; }
+              say("بنحمّل الباك...");
+              new Thread(new Runnable() { public void run() { load(id); } }).start();
+            }
+
+            void load(String id) {
+              try {
+                File dir = new File(getFilesDir(), "packs/" + id);
+                if (!new File(dir, "tray.png").exists()) {
+                  dir.mkdirs();
+                  HttpURLConnection c = (HttpURLConnection) new URL(BASE + id).openConnection();
+                  c.setConnectTimeout(20000); c.setReadTimeout(60000);
+                  if (c.getResponseCode() != 200) { say("الباك ده انتهى أو مش موجود. اطلبه من البوت تاني."); return; }
+                  InputStream in = c.getInputStream();
+                  ZipInputStream z = new ZipInputStream(in);
+                  ZipEntry e; byte[] buf = new byte[16384];
+                  while ((e = z.getNextEntry()) != null) {
+                    String n = e.getName();
+                    if (e.isDirectory() || !n.matches("[A-Za-z0-9_.\\-]{1,60}")) continue;
+                    FileOutputStream o = new FileOutputStream(new File(dir, n));
+                    int r; while ((r = z.read(buf)) > 0) o.write(buf, 0, r);
+                    o.close();
+                  }
+                  z.close();
+                }
+                Pack p = Pack.read(dir, id);
+                if (p == null) { say("الباك ناقص أو فاضي."); return; }
+                if (p.stickers.size() < 3) { say("واتساب بيشترط 3 استيكرز على الأقل في الباك، والباك ده فيه " + p.stickers.size() + " بس."); return; }
+                if (p.stickers.size() > 30) { say("واتساب بيقبل 30 استيكر بالكتير في الباك."); return; }
+                Pack.prune(getFilesDir(), id);
+                go(p);
+              } catch (Exception ex) {
+                say("حصلت مشكلة في التحميل. اتأكد من النت وجرب تاني.");
+              }
+            }
+
+            void go(final Pack p) {
+              runOnUiThread(new Runnable() { public void run() {
+                Intent it = new Intent();
+                it.setAction("com.whatsapp.intent.action.ENABLE_STICKER_PACK");
+                it.putExtra("sticker_pack_id", p.id);
+                it.putExtra("sticker_pack_authority", AUTH);
+                it.putExtra("sticker_pack_name", p.name);
+                try {
+                  tv.setText("بنفتح واتساب...");
+                  startActivityForResult(it, 200);
+                } catch (ActivityNotFoundException ex) {
+                  tv.setText("واتساب مش متثبت على التليفون ده، أو نسخته قديمة.");
+                }
+              } });
+            }
+
+            @Override protected void onActivityResult(int req, int res, Intent data) {
+              super.onActivityResult(req, res, data);
+              if (req == 200) {
+                if (res == RESULT_OK) tv.setText("تمام، الباك اتضاف في واتساب ✅");
+                else {
+                  String err = data != null ? data.getStringExtra("validation_error") : null;
+                  tv.setText(err != null ? "واتساب رفض الباك: " + err : "اتلغت الإضافة. ممكن تجرب تاني من نفس اللينك.");
+                }
+              }
+            }
+          }
+          SRC_EOF
+          mkdir -p $(dirname android/app/src/main/java/com/t1uu1/stickerbridge/Pack.java)
+          cat > android/app/src/main/java/com/t1uu1/stickerbridge/Pack.java <<'SRC_EOF'
+          package com.t1uu1.stickerbridge;
+
+          import java.io.File;
+          import java.io.FileInputStream;
+          import java.io.FileReader;
+          import java.io.BufferedReader;
+          import java.util.ArrayList;
+          import java.util.Arrays;
+          import java.util.Comparator;
+          import java.util.List;
+
+          class Pack {
+            String id, name, publisher; boolean animated; List<String> stickers = new ArrayList<String>();
+
+            static Pack read(File dir, String id) throws Exception {
+              File[] fs = dir.listFiles(); if (fs == null || !new File(dir, "tray.png").exists()) return null;
+              Pack p = new Pack(); p.id = id;
+              p.name = text(new File(dir, "title.txt"), "Stickers");
+              p.publisher = text(new File(dir, "author.txt"), "@T1UU1");
+              Arrays.sort(fs, new Comparator<File>() { public int compare(File a, File b) {
+                return Integer.compare(num(a.getName()), num(b.getName())); } });
+              for (File f : fs) if (f.getName().endsWith(".webp")) p.stickers.add(f.getName());
+              if (!p.stickers.isEmpty()) {
+                FileInputStream in = new FileInputStream(new File(dir, p.stickers.get(0)));
+                byte[] h = new byte[128]; int n = in.read(h); in.close();
+                String s = new String(h, 0, Math.max(n, 0), "ISO-8859-1"); p.animated = s.contains("ANIM");
+              }
+              return p;
+            }
+
+            static int num(String n) { try { return Integer.parseInt(n.replaceAll("\\D", "")); } catch (Exception e) { return 0; } }
+
+            static String text(File f, String d) {
+              try { BufferedReader r = new BufferedReader(new FileReader(f)); String s = r.readLine(); r.close();
+                return s == null || s.trim().isEmpty() ? d : s.trim(); } catch (Exception e) { return d; }
+            }
+
+            static void prune(File filesDir, String keep) {
+              File[] ps = new File(filesDir, "packs").listFiles(); if (ps == null || ps.length <= 10) return;
+              Arrays.sort(ps, new Comparator<File>() { public int compare(File a, File b) { return Long.compare(a.lastModified(), b.lastModified()); } });
+              for (int i = 0; i < ps.length - 10; i++) if (!ps[i].getName().equals(keep)) {
+                File[] in = ps[i].listFiles(); if (in != null) for (File f : in) f.delete(); ps[i].delete(); }
+            }
+          }
+          SRC_EOF
+          mkdir -p $(dirname android/app/src/main/java/com/t1uu1/stickerbridge/StickerContentProvider.java)
+          cat > android/app/src/main/java/com/t1uu1/stickerbridge/StickerContentProvider.java <<'SRC_EOF'
+          package com.t1uu1.stickerbridge;
+
+          import android.content.ContentProvider;
+          import android.content.ContentValues;
+          import android.content.UriMatcher;
+          import android.content.res.AssetFileDescriptor;
+          import android.database.Cursor;
+          import android.database.MatrixCursor;
+          import android.net.Uri;
+          import android.os.ParcelFileDescriptor;
+          import java.io.File;
+          import java.io.FileNotFoundException;
+          import java.util.List;
+
+          public class StickerContentProvider extends ContentProvider {
+            static final String AUTH = MainActivity.AUTH;
+            static final UriMatcher M = new UriMatcher(UriMatcher.NO_MATCH);
+            static {
+              M.addURI(AUTH, "metadata", 1);
+              M.addURI(AUTH, "metadata/*", 2);
+              M.addURI(AUTH, "stickers/*", 3);
+              M.addURI(AUTH, "stickers_asset/*/*", 4);
+            }
+
+            @Override public boolean onCreate() { return true; }
+
+            File packsDir() { return new File(getContext().getFilesDir(), "packs"); }
+
+            @Override public Cursor query(Uri uri, String[] proj, String sel, String[] args, String order) {
+              try {
+                switch (M.match(uri)) {
+                  case 1: return metadata(null);
+                  case 2: return metadata(uri.getLastPathSegment());
+                  case 3: return stickers(uri.getLastPathSegment());
+                }
+              } catch (Exception e) { }
+              return null;
+            }
+
+            Cursor metadata(String only) throws Exception {
+              MatrixCursor c = new MatrixCursor(new String[] { "sticker_pack_identifier", "sticker_pack_name", "sticker_pack_publisher",
+                "sticker_pack_icon", "android_play_store_link", "ios_app_download_link", "sticker_pack_publisher_email",
+                "sticker_pack_publisher_website", "sticker_pack_privacy_policy_website", "sticker_pack_license_agreement_website",
+                "image_data_version", "whatsapp_will_not_cache_stickers", "animated_sticker_pack" });
+              File[] ps = packsDir().listFiles();
+              if (ps != null) for (File d : ps) {
+                if (only != null && !d.getName().equals(only)) continue;
+                Pack p = Pack.read(d, d.getName()); if (p == null) continue;
+                c.addRow(new Object[] { p.id, p.name, p.publisher, "tray.png", "", "", "", "", "", "", "1", 0, p.animated ? 1 : 0 });
+              }
+              return c;
+            }
+
+            Cursor stickers(String id) throws Exception {
+              MatrixCursor c = new MatrixCursor(new String[] { "sticker_file_name", "sticker_emoji", "sticker_accessibility_text" });
+              Pack p = Pack.read(new File(packsDir(), id), id);
+              if (p != null) for (String s : p.stickers) c.addRow(new Object[] { s, "\uD83D\uDE00", p.name });
+              return c;
+            }
+
+            @Override public AssetFileDescriptor openAssetFile(Uri uri, String mode) throws FileNotFoundException {
+              if (M.match(uri) != 4) throw new FileNotFoundException();
+              List<String> s = uri.getPathSegments();
+              String id = s.get(1), name = s.get(2);
+              if (!id.matches("[a-z0-9]{6,40}") || !name.matches("[A-Za-z0-9_.\\-]{1,60}")) throw new FileNotFoundException();
+              File f = new File(new File(packsDir(), id), name);
+              if (!f.exists()) throw new FileNotFoundException();
+              return new AssetFileDescriptor(ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY), 0, AssetFileDescriptor.UNKNOWN_LENGTH);
+            }
+
+            @Override public String getType(Uri uri) {
+              switch (M.match(uri)) {
+                case 1: return "vnd.android.cursor.dir/vnd." + AUTH + ".metadata";
+                case 2: return "vnd.android.cursor.item/vnd." + AUTH + ".metadata";
+                case 3: return "vnd.android.cursor.dir/vnd." + AUTH + ".stickers";
+              }
+              return null;
+            }
+            @Override public Uri insert(Uri u, ContentValues v) { throw new UnsupportedOperationException(); }
+            @Override public int delete(Uri u, String s, String[] a) { throw new UnsupportedOperationException(); }
+            @Override public int update(Uri u, ContentValues v, String s, String[] a) { throw new UnsupportedOperationException(); }
+          }
+          SRC_EOF
+      - name: build
+        working-directory: android
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - name: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk stickerbridge.apk
+          ls -la stickerbridge.apk
+          gh release delete app-latest -y --cleanup-tag --repo "$GITHUB_REPOSITORY" || true
+          gh release create app-latest stickerbridge.apk --repo "$GITHUB_REPOSITORY" --title "StickerBridge" --notes "StickerBridge Android app"
