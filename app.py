@@ -34,7 +34,39 @@ def src_args(kind, data, d, size=512):
     p = os.path.join(d, "in.webm"); open(p, "wb").write(data)
     return ["-c:v", "libvpx-vp9", "-i", p]
 
+def _fast_tgs(fmt, data):
+    import io
+    from rlottie_python import LottieAnimation
+    d = tempfile.mkdtemp()
+    try:
+        p = os.path.join(d, "in.tgs"); open(p, "wb").write(data)
+        anim = LottieAnimation.from_tgs(p)
+        n = anim.lottie_animation_get_totalframe(); fps = anim.lottie_animation_get_framerate() or 30
+        if fmt == "tray":
+            im = anim.render_pillow_frame(frame_num=0, width=96, height=96).convert("RGBA")
+            b = io.BytesIO(); im.save(b, "PNG"); return b.getvalue(), "image/png"
+        best = None
+        for q, mf in ((70, 15), (50, 12), (35, 10), (22, 8), (12, 8)):
+            step = 1
+            while fps / step > mf: step += 1
+            maxn = max(1, int(9.5 * fps / step))
+            frames = [anim.render_pillow_frame(frame_num=i, width=512, height=512).convert("RGBA") for i in range(0, n, step)][:maxn]
+            dur = max(8, int(round(1000 * step / fps)))
+            b = io.BytesIO()
+            frames[0].save(b, "WEBP", save_all=True, append_images=frames[1:], duration=dur, loop=0, quality=q, method=2)
+            best = b.getvalue()
+            if fmt != "wa" or len(best) <= 500000: break
+        return best, "image/webp"
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
+
 def convert(kind, fmt, data):
+    if kind == "tgs" and fmt in ("wa", "awebp", "tray"):
+        try: return _fast_tgs(fmt, data)
+        except Exception: pass
+    return _convert_ff(kind, fmt, data)
+
+def _convert_ff(kind, fmt, data):
     d = tempfile.mkdtemp()
     try:
         src = src_args(kind, data, d, 384 if fmt in ("gif", "mp4") else (96 if fmt == "tray" else 512))
