@@ -1,7 +1,7 @@
 import os, io, json, time, zipfile, urllib.request, concurrent.futures as cf
 from app import convert
 
-BASE = os.environ["WORKER_URL"]; KEY = os.environ["CONVERT_KEY"]; JOB = os.environ["JOB"]
+BASE = os.environ["WORKER_URL"]; KEY = os.environ["CONVERT_KEY"].strip(); JOB = os.environ["JOB"]
 T0 = time.time()
 
 def call(path, data=None):
@@ -37,7 +37,7 @@ try:
     print("converted", len(res), "stickers in", secs, "s; zip bytes", buf.tell())
     call(f"/gh/done?id={JOB}&secs={secs}", buf.getvalue())
 except Exception as e:
-    print("failed:", type(e).__name__)
+    print("failed:", type(e).__name__, str(e)[:200])
     try: call(f"/gh/fail?id={JOB}", b"x")
     except Exception: pass
     raise SystemExit(1)
