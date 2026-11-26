@@ -1,0 +1,28 @@
+name: convert
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: job id
+        required: true
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: install
+        run: |
+          which ffmpeg || (sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends ffmpeg)
+          pip install -r requirements.txt
+      - name: convert
+        env:
+          JOB: ${{ inputs.job }}
+          WORKER_URL: https://contact-bot.amier8627.workers.dev
+          CONVERT_KEY: ${{ secrets.CONVERT_KEY }}
+        run: python gh_runner.py
